@@ -32,7 +32,7 @@ from models.mvcnn import *
 from models.mvcnn_top_small import *
 from models.mvcnn_bottom_small import *
 import util
-from logger import Logger
+# from logger import Logger
 from custom_dataset import MultiViewDataSet
 import sys
 
@@ -194,11 +194,11 @@ transform = transforms.Compose([
 ])
 
 # Load dataset
-dset_train = torchvision.datasets.CIFAR10(root='./data', train=True,
+dset_train = torchvision.datasets.MNIST(root='./data', train=True,
                                                 download=True, transform=transform)
 train_loader = DataLoader(dset_train, batch_size=args.batch_size, shuffle=False, num_workers=1)
 
-dset_val = torchvision.datasets.CIFAR10(root='./data', train=False,
+dset_val = torchvision.datasets.MNIST(root='./data', train=False,
                                                 download=True, transform=transform)
 test_loader = DataLoader(dset_val, batch_size=args.batch_size, shuffle=False, num_workers=1)
 
