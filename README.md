@@ -10,15 +10,39 @@ baseline for our exp
 curl -#OL "https://download.gpushare.com/download/update_source"
 chmod u+x ./update_source
 ./update_source apt
+# 7 (bfsu)
 curl -#OL "https://download.gpushare.com/download/update_source"
 chmod u+x ./update_source
 ./update_source conda
+# 1 (bfsu)
+apt update
+apt upgrade
+apt install screen tree pciutils
+vim ~/.ssh/authorized_keys
+```
+
+```sh
+vim ~/.bashrc
+```
+
+```sh
+git config --global http.sslVerify "false"
+alias py='python'
+export TMOUT=600
+cd /hy-tmp/
 ```
 
 ##### env-conda
 
 ```sh
-conda install pytorch==1.4.0 torchvision==0.5.0 cudatoolkit=10.1 -c pytorch
+conda create -y -n py37 python=3.7
+conda activate py37
+which python
+conda install pytorch==1.4.0 cudatoolkit=10.1 -c pytorch
+pip install --upgrade pip wheel setuptools
+pip install torchvision==0.5.0 -i https://mirrors.jlu.edu.cn/pypi/simple
+pip install scikit-learn tqdm scipy pandas matplotlib -i https://mirrors.jlu.edu.cn/pypi/simple
+pip install latbin -i https://mirrors.jlu.edu.cn/pypi/simple
 ```
 
 ##### env-docker
@@ -38,18 +62,10 @@ lsmem
 lspci
 ```
 
-#### dev
-
-```sh
-# python -m pip install seaborn pillow matplotlib tqdm pandas
-# python -m pip install transformers[torch]
-# python -m pip install pytorch_transformers
-# python -m pip install torchrec-nightly torchtext numba
-```
-
 ##### run
 
 ```sh
+git clone https://github.com/workelaina/cvfl.git
 screen -R cvfl
 cd cvfl/ModelNet_CVFL
 python quant_cifar.py 10class/classes/ --num_clients 4 --b 100 --local_epochs 10 --epochs 200 --lr 0.0001 --quant_level 8 --vecdim 2 --comp quantize
