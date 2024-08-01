@@ -132,12 +132,13 @@ def quantize_vector(x, quant_min=0, quant_max=1, quant_level=5, dim=2):
     x_normalize = x_normalize + dither
 
     A2 = latbin.lattice.ALattice(dim,scale=1/(2*math.log(quant_level,2)))
-    if quant_level == 4:
-        A2 = latbin.lattice.ALattice(dim,scale=1/4)
-    elif quant_level == 8:
-        A2 = latbin.lattice.ALattice(dim,scale=1/8.5)
-    elif quant_level == 16:
-        A2 = latbin.lattice.ALattice(dim,scale=1/19)
+    # What?
+    # if quant_level == 4:
+    #     A2 = latbin.lattice.ALattice(dim,scale=1/4)
+    # elif quant_level == 8:
+    #     A2 = latbin.lattice.ALattice(dim,scale=1/8.5)
+    # elif quant_level == 16:
+    #     A2 = latbin.lattice.ALattice(dim,scale=1/19)
     
     for i in range(0, x_normalize.shape[1], dim):
         x_normalize[:,i:(i+dim)] = A2.lattice_to_data_space(
