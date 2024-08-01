@@ -1,29 +1,57 @@
-# Compressed Vertical Federated Learning
+# +
 
-Code for simulating C-VFL, a communication-efficient algorithm for vertically partitioned data.
-More details on the algorithm can be in our paper: [**Compressed-VFL: Communication-Efficient Learning with Vertically
-Partitioned Data**](https://arxiv.org/abs/2206.08330):
+baseline for our exp
 
-```
-@inproceedings{castiglia2022compressed,
-  title={Compressed-VFL: Communication-Efficient Learning with Vertically Partitioned Data},
-  author={Castiglia, Timothy and Das, Anirban and Wang, Shiqiang and Patterson, Stacy},
-  booktitle={International Conference on Machine Learning},
-  year={2022}
-}
-```
+#### env and run
 
-### Dependencies
-One can install our environment with Anaconda:
-```bash
-conda env create -f flearn.yml 
+##### env-gpushare
+
+```sh
+curl -#OL "https://download.gpushare.com/download/update_source"
+chmod u+x ./update_source
+./update_source apt
+curl -#OL "https://download.gpushare.com/download/update_source"
+chmod u+x ./update_source
+./update_source conda
 ```
 
-### Repository Structure
-'ModelNet_CVFL': contains code for running C-VFL with the ModelNet10 and CIFAR-10 datasets
+##### env-conda
 
-'ImageNet_CVFL': contains code for running C-VFL with the ImageNet dataset
+```sh
+conda install pytorch==1.4.0 torchvision==0.5.0 cudatoolkit=10.1 -c pytorch
+```
 
-'mimic3_CVFL': contains code for running C-VFL with the MIMIC-III dataset
+##### env-docker
 
-Information on how to run C-VFL are provided in the README's in each folder.
+```sh
+# python -m pip install --upgrade pip wheel setuptools
+```
+
+##### check
+
+```sh
+nvidia-smi
+which python
+python -c 'import torch;print(torch.cuda.is_available())'
+lscpu
+lsmem
+lspci
+```
+
+#### dev
+
+```sh
+# python -m pip install seaborn pillow matplotlib tqdm pandas
+# python -m pip install transformers[torch]
+# python -m pip install pytorch_transformers
+# python -m pip install torchrec-nightly torchtext numba
+```
+
+##### run
+
+```sh
+screen -R cvfl
+cd cvfl/ModelNet_CVFL
+python quant_cifar.py 10class/classes/ --num_clients 4 --b 100 --local_epochs 10 --epochs 200 --lr 0.0001 --quant_level 8 --vecdim 2 --comp quantize
+Ctrl A D
+```
