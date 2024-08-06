@@ -14,15 +14,20 @@ model_urls = {
 class RESNET_top(nn.Module):
     def __init__(self, num_classes=1000, num_clients=4, embedding_size=128):
         super(RESNET_top, self).__init__()
-        self.fc1 = nn.Linear(16 * num_clients, embedding_size)
-        self.fc2 = nn.Linear(embedding_size, num_classes)
+        self.classifier = nn.Sequential(
+            nn.Linear(16 * num_clients, num_classes),
+        )
+        # self.fc1 = nn.Linear(52 * num_clients, embedding_size)
+        # self.fc2 = nn.Linear(embedding_size, num_classes)
 
     def forward(self, x):
-        x = self.fc1(x)
-        x = nn.functional.relu(x)
-        x = self.fc2(x)
-        x = nn.functional.softmax(x, dim=1)
-        return x
+        pooled_view = self.classifier(x)
+        return pooled_view
+        # x = self.fc1(x)
+        # x = nn.functional.relu(x)
+        # x = self.fc2(x)
+        # x = nn.functional.softmax(x, dim=1)
+        # return x
 
 
 def resnet_top(pretrained=False, **kwargs):
