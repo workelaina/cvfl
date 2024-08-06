@@ -194,13 +194,70 @@ transform = transforms.Compose([
 ])
 
 # Load dataset
-dset_train = torchvision.datasets.MNIST(root='./data', train=True,
-                                                download=True, transform=transform)
+# dset_train = torchvision.datasets.MNIST(root='./data', train=True,
+#                                                 download=True, transform=transform)
+# dset_val = torchvision.datasets.MNIST(root='./data', train=False,
+#                                                 download=True, transform=transform)
+
+import pandas as pd
+from torch.utils.data import Dataset, DataLoader
+from sklearn.preprocessing import StandardScaler, OneHotEncoder
+from sklearn.compose import ColumnTransformer
+from sklearn.model_selection import train_test_split
+
+class CriteoDataset(Dataset):
+    def __init__(self, features, labels):
+        self.features = features
+        self.labels = labels
+
+    def __len__(self):
+        return len(self.features)
+
+    def __getitem__(self, idx):
+        x = self.features[idx]
+        y = self.labels[idx]
+        return torch.tensor(x, dtype=torch.float32), torch.tensor(y, dtype=torch.float32)
+
+# 预处理Criteo数据集
+def load_criteo_data(file_path):
+    # 假设Criteo数据以CSV格式存储
+    data = pd.read_csv(file_path)
+
+    # 假设数据集最后一列为标签
+    labels = data.iloc[:, -1].values
+    features = data.iloc[:, :-1]
+
+    # 对数值特征进行标准化
+    numeric_features = features.select_dtypes(include=['int64', 'float64']).columns
+    categorical_features = features.select_dtypes(include=['object']).columns
+
+    # 使用ColumnTransformer进行预处理
+    preprocessor = ColumnTransformer(
+        transformers=[
+            ('num', StandardScaler(), numeric_features),
+            ('cat', OneHotEncoder(handle_unknown='ignore'), categorical_features)
+        ])
+
+    features = preprocessor.fit_transform(features)
+
+    return features, labels  
+
+
+file_path = os.path.join(DATA_DIR, 'criteo.csv')
+features, labels = load_criteo_data(file_path)
+
+# 将数据拆分为训练集和测试集
+X_train, X_test, y_train, y_test = train_test_split(features, labels, test_size=0.3, stratify=labels)
+
+dset_train = CriteoDataset(X_train, y_train)
+dset_val = CriteoDataset(X_test, y_test)
+
+
 train_loader = DataLoader(dset_train, batch_size=args.batch_size, shuffle=False, num_workers=1)
 
-dset_val = torchvision.datasets.MNIST(root='./data', train=False,
-                                                download=True, transform=transform)
 test_loader = DataLoader(dset_val, batch_size=args.batch_size, shuffle=False, num_workers=1)
+
+print(dset_train, dset_val)
 
 classes = dset_train.classes
 print(len(classes), classes)
