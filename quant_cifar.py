@@ -8,6 +8,7 @@ import torch.backends.cudnn as cudnn
 from torch.utils.data import DataLoader
 from torch.autograd import Variable
 
+import torchvision
 import torchvision.transforms as transforms
 
 import argparse
@@ -20,24 +21,23 @@ import pickle
 import math
 import itertools
 
-from scipy.optimize import minimize
-from scipy.optimize import Bounds
-from scipy.optimize import NonlinearConstraint
-from scipy.optimize import BFGS
+# from scipy.optimize import minimize
+# from scipy.optimize import Bounds
+# from scipy.optimize import NonlinearConstraint
+# from scipy.optimize import BFGS
 
-from models.resnet import *
-from models.mvcnn import *
-from models.mvcnn_top_small2 import *
-from models.mvcnn_bottom_small2 import *
-#from models.mvcnn_top import *
-#from models.mvcnn_bottom import *
-import util
-from logger import Logger
-from custom_dataset import MultiViewDataSet
+# from models.resnet2 import *
+# from models.resnet_top import *
+# from models.mvcnn import *
+# from models.mvcnn_top_small import *
+# from models.mvcnn_bottom_small import *
+# import util
+# from logger import Logger
+# from custom_dataset import MultiViewDataSet
 import sys
 
-from sklearn.cluster import KMeans
-from sklearn import metrics as skmetrics
+# from sklearn.cluster import KMeans
+# from sklearn import metrics as skmetrics
 
 import latbin
 
@@ -97,14 +97,14 @@ parser.add_argument('--seed', type=int, help='Random seed to use', default=42)
 # Parse input arguments
 args = parser.parse_args()
 
-# Parse input arguments
-args = parser.parse_args()
+suffix = f"_cifar_NC{args.num_clients}_LE{args.local_epochs}_quant{args.quant_level}_dim{args.vecdim}_comp{args.comp}_seed{args.seed}"
 
 np.random.seed(args.seed)
 torch.manual_seed(args.seed)
 random.seed(args.seed)
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+assert torch.cuda.is_available()
+device = torch.device("cuda:0")
 
 def quantize_vector(x, quant_min=0, quant_max=1, quant_level=5, dim=2):
     """Uniform vector quantization approach
@@ -133,12 +133,13 @@ def quantize_vector(x, quant_min=0, quant_max=1, quant_level=5, dim=2):
     x_normalize = x_normalize + dither
 
     A2 = latbin.lattice.ALattice(dim,scale=1/(2*math.log(quant_level,2)))
-    if quant_level == 4:
-        A2 = latbin.lattice.ALattice(dim,scale=1/4)
-    elif quant_level == 8:
-        A2 = latbin.lattice.ALattice(dim,scale=1/8.5)
-    elif quant_level == 16:
-        A2 = latbin.lattice.ALattice(dim,scale=1/19)
+    # What?
+    # if quant_level == 4:
+    #     A2 = latbin.lattice.ALattice(dim,scale=1/4)
+    # elif quant_level == 8:
+    #     A2 = latbin.lattice.ALattice(dim,scale=1/8.5)
+    # elif quant_level == 16:
+    #     A2 = latbin.lattice.ALattice(dim,scale=1/19)
     
     for i in range(0, x_normalize.shape[1], dim):
         x_normalize[:,i:(i+dim)] = A2.lattice_to_data_space(
@@ -186,64 +187,146 @@ def quantize_scalar(x, quant_min=0, quant_max=1, quant_level=5):
 
 print('Loading data')
 
-normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                 std=[0.229, 0.224, 0.225])
-transform1 =transforms.Compose([
-        transforms.RandomResizedCrop(224),
-        transforms.RandomHorizontalFlip(),
-        transforms.ToTensor(),
-        normalize,
-    ])
-transform2 = transforms.Compose([
-            transforms.Resize(256),
-            transforms.CenterCrop(224),
-            transforms.ToTensor(),
-            normalize,
-    ])
+transform = transforms.Compose([
+    # transforms.RandomCrop(32, padding=4),
+    # transforms.RandomHorizontalFlip(),
+    transforms.ToTensor(),
+    # transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
+])
 
 # Load dataset
-dset_train = MultiViewDataSet(args.data, 'train', transform=transform1)
-train_loader = DataLoader(dset_train, batch_size=args.batch_size, shuffle=False, num_workers=1)
-indices = torch.randperm(len(dset_train))
-dset_train_sub = torch.utils.data.Subset(dset_train, indices[:int(len(dset_train)/4)])
-train_loader = DataLoader(dset_train_sub, batch_size=args.batch_size, shuffle=False, num_workers=1)
+# dset_train = torchvision.datasets.MNIST(
+#     root='./data',
+#     train=True,
+#     download=True,
+#     transform=transform
+# )
+# dset_val = torchvision.datasets.MNIST(
+#     root='./data',
+#     train=False,
+#     download=True,
+#     transform=transform
+# )
 
-dset_val = MultiViewDataSet(args.data, 'test', transform=transform2)
+import pandas as pd
+from torch.utils.data import Dataset, DataLoader
+from sklearn.preprocessing import StandardScaler, OneHotEncoder
+from sklearn.compose import ColumnTransformer
+from sklearn.model_selection import train_test_split
+
+class CriteoDataset(Dataset):
+    def __init__(self, features, labels):
+        self.features = features
+        self.labels = labels
+
+    def __len__(self):
+        return len(self.features)
+
+    def __getitem__(self, idx):
+        x = self.features[idx]
+        y = self.labels[idx]
+        return torch.tensor(x, dtype=torch.float32), torch.tensor(y, dtype=torch.float32)
+
+# 预处理Criteo数据集
+def load_criteo_data(file_path):
+    # 假设Criteo数据以CSV格式存储
+    data = pd.read_csv(file_path)
+
+    # 假设数据集最后一列为标签
+    labels = data.iloc[:, -1].values
+    features = data.iloc[:, :-1]
+
+    # 对数值特征进行标准化
+    numeric_features = features.select_dtypes(include=['int64', 'float64']).columns
+    categorical_features = features.select_dtypes(include=['object']).columns
+
+    # 使用ColumnTransformer进行预处理
+    preprocessor = ColumnTransformer(
+        transformers=[
+            ('num', StandardScaler(), numeric_features),
+            ('cat', OneHotEncoder(handle_unknown='ignore'), categorical_features)
+        ])
+
+    features = preprocessor.fit_transform(features)
+
+    return features, labels  
+
+
+file_path = os.path.join('data/criteo.csv')
+features, labels = load_criteo_data(file_path)
+
+# 将数据拆分为训练集和测试集
+X_train, X_test, y_train, y_test = train_test_split(features, labels, test_size=0.3, stratify=labels)
+
+dset_train = CriteoDataset(X_train, y_train)
+dset_val = CriteoDataset(X_test, y_test)
+
+
+train_loader = DataLoader(dset_train, batch_size=args.batch_size, shuffle=False, num_workers=1)
+
 test_loader = DataLoader(dset_val, batch_size=args.batch_size, shuffle=False, num_workers=1)
 
-classes = dset_train.classes
-print(len(classes), classes)
+print(dset_train, dset_val)
+print(train_loader, test_loader)
+
+losses = []
+accs_train = []
+accs_test = []
+
+best_acc = 0.0
+best_loss = 0.0
+start_epoch = 0
+
+
+class MLP_client(nn.Module):
+    def __init__(self, input_size=52, output_size=52):
+        super(MLP_client, self).__init__()
+        self.conv1 = nn.Linear(input_size, output_size)
+        self.classifier = nn.Sequential(self.conv1)
+
+    def forward(self, x):
+        x = self.classifier(x)
+        x = nn.functional.relu(x)
+        return x
+
+
+class MLP_server(nn.Module):
+    def __init__(self, input_size=52*2, output_size=2):
+        super(MLP_server, self).__init__()
+        self.conv1 = nn.Linear(input_size, output_size)
+        self.classifier = nn.Sequential(self.conv1)
+
+    def forward(self, x):
+        x = self.classifier(x)
+        x = torch.sigmoid(x)
+        return x
+
 
 models = []
 optimizers = []
 # Make models for each client
 for i in range(num_clients+1):
     if i == num_clients:
-        model = mvcnn_top(pretrained=args.pretrained, 
-			num_classes=len(classes), num_clients=num_clients)
+        model = MLP_server()
     else:
-        model = mvcnn_bottom(pretrained=args.pretrained,num_classes=len(classes))
+        model = MLP_client()
+    optimizer = torch.optim.SGD(model.parameters(), lr=args.lr)
 
     model.to(device)
     cudnn.benchmark = True
 
-    optimizer = torch.optim.SGD(model.parameters(), lr=args.lr)
     models.append(model)
     optimizers.append(optimizer)
 
-server_model_comp = mvcnn_top(pretrained=args.pretrained, 
-			num_classes=len(classes), num_clients=num_clients)
+server_model_comp = MLP_server()
+
 server_model_comp.to(device)
 server_optimizer_comp = torch.optim.SGD(server_model_comp.parameters(), lr=args.lr)
 
 # Loss and Optimizer
 n_epochs = args.epochs
 criterion = nn.CrossEntropyLoss()
-coords_per = int(12/num_clients)
-
-best_acc = 0.0
-best_loss = 0.0
-start_epoch = 0
+coords_per = args.batch_size
 
 def save_eval(models, train_loader, test_loader, losses, accs_train, accs_test, step, train_size):
     """
@@ -256,9 +339,9 @@ def save_eval(models, train_loader, test_loader, losses, accs_train, accs_test, 
     accs_train.append(avg_train_acc)
     accs_test.append(avg_test_acc)
 
-    pickle.dump(losses, open(f'./loss_mvcnn_NC{args.num_clients}_LE{args.local_epochs}_quant{args.quant_level}_dim{args.vecdim}_comp{args.comp}_seed{args.seed}.pkl', 'wb'))
-    pickle.dump(accs_train, open(f'./accs_train_mvcnn_NC{args.num_clients}_LE{args.local_epochs}_quant{args.quant_level}_dim{args.vecdim}_comp{args.comp}_seed{args.seed}.pkl', 'wb'))
-    pickle.dump(accs_test, open(f'./accs_test_mvcnn_NC{args.num_clients}_LE{args.local_epochs}_quant{args.quant_level}_dim{args.vecdim}_comp{args.comp}_seed{args.seed}.pkl', 'wb'))
+    pickle.dump(losses, open(f'./loss{suffix}.pkl','wb'))
+    pickle.dump(accs_train, open(f'./accs_train{suffix}.pkl','wb'))
+    pickle.dump(accs_test, open(f'./accs_test{suffix}.pkl','wb'))
 
     print('Iter [%d/%d]: Test Acc: %.2f - Train Acc: %.2f - Loss: %.4f' 
             % (step + 1, train_size, avg_test_acc.item(), avg_train_acc.item(), avg_loss.item()))
@@ -289,12 +372,16 @@ def train(models, optimizers, epoch): #, centers):
 
         inputs = torch.from_numpy(inputs)
 
-        inputs, targets = inputs.cuda(device), targets.cuda(device)
-        inputs, targets = Variable(inputs), Variable(targets)
+        inputs, targets = inputs.to(device), targets.to(device)
+        # inputs, targets = Variable(inputs), Variable(targets)
         # Exchange embeddings
         H_orig = [None] * num_clients
         for i in range(num_clients):
-            x_local = inputs[:,coords_per*i:coords_per*(i+1),:,:,:]
+            r = math.floor(i/2)
+            c = i % 2
+            section = coords_per
+            x_local = inputs[:, section*r:section*(r+1)]
+            x_local = torch.transpose(x_local,0,1)
             with torch.no_grad():
                 H_orig[i] = models[i](x_local)
 
@@ -302,7 +389,6 @@ def train(models, optimizers, epoch): #, centers):
             if comp != "":
                 if comp == "topk" and not (epoch == 0 and step == 0):
                     # Choose top k elements based on grads_Hs[i]
-                    #H_orig[i] = topk(H_orig[i], ratio) 
                     H_tmp = H_orig[i].cpu().detach().numpy()
                     num = math.ceil(H_tmp.shape[1]*(1-ratio))
                     grads = np.abs(grads_Hs[i])
@@ -346,7 +432,11 @@ def train(models, optimizers, epoch): #, centers):
 
         # Train clients
         for i in range(num_clients):
-            x_local = inputs[:,coords_per*i:coords_per*(i+1),:,:,:]
+            r = math.floor(i/2)
+            c = i % 2
+            section = coords_per
+            x_local = inputs[:, section*r:section*(r+1)]
+            x_local = torch.transpose(x_local,0,1)
             H = H_orig.copy()
             model = models[i]
             optimizer = optimizers[i]
@@ -359,17 +449,12 @@ def train(models, optimizers, epoch): #, centers):
                 outputs = model(x_local)
                 H[i] = outputs
                 outputs = server_model_comp(torch.cat(H,axis=1))
-                loss = criterion(outputs, targets)
+                loss = criterion(outputs, targets.to(torch.int64))
 
                 # compute gradient and do gradient step
                 optimizer.zero_grad()
                 server_optimizer_comp.zero_grad()
-                loss.backward()
-                #params = []
-                #for param in server_model_comp.parameters():
-                #    params.append(param.grad)
-                #params[0] = params[0].detach().cpu().numpy()
-                #grads_Hs[i] = np.mean(np.array(params[0][:,256*5*5*i:256*5*5*(i+1)]), axis=0)
+                loss.backward(retain_graph=True)
                 params = []
                 for param in model.parameters():
                     params.append(param.grad)
@@ -382,7 +467,7 @@ def train(models, optimizers, epoch): #, centers):
             H = H_orig.copy()
             # compute output
             outputs = server_model(torch.cat(H,axis=1))
-            loss = criterion(outputs, targets)
+            loss = criterion(outputs, targets.to(torch.int64))
 
             # compute gradient and do SGD step
             server_optimizer.zero_grad()
@@ -417,11 +502,19 @@ def eval(models, data_loader):
             # Get current embeddings
             H_new = [None] * num_clients
             for i in range(num_clients):
-                x_local = inputs[:,coords_per*i:coords_per*(i+1),:,:,:]
+                r = math.floor(i/2)
+                c = i % 2
+                section = coords_per
+                # print(inputs.shape)
+                # print(section*r, section*(r+1), section*c, section*(c+1))
+                x_local = inputs[:, section*r:section*(r+1)]
+                x_local = torch.transpose(x_local,0,1)
                 H_new[i] = models[i](x_local)
             # compute output
             outputs = models[-1](torch.cat(H_new,axis=1))
-            loss = criterion(outputs, targets)
+
+            # print(outputs.shape, targets.shape)
+            loss = criterion(outputs, targets.to(torch.int64))
 
             total_loss += loss
             n += 1
@@ -435,20 +528,28 @@ def eval(models, data_loader):
 
     return avg_test_acc, avg_loss
 
-
-losses = []
-accs_train = []
-accs_test = []
+print('[111]')
 # Get initial loss/accuracy
-save_eval(models, train_loader, test_loader, losses, accs_train, accs_test, 0, len(train_loader))
+if start_epoch == 0:
+    save_eval(models, train_loader, test_loader, losses, accs_train, accs_test, 0, len(train_loader))
 # Training / Eval loop
 train_size = len(train_loader)
+print('[222]')
 for epoch in range(start_epoch, n_epochs):
     print('\n-----------------------------------')
     print('Epoch: [%d/%d]' % (epoch+1, n_epochs))
     start = time.time()
 
     train(models, optimizers, epoch)
-    print('Time taken: %.2f sec.' % (time.time() - start))
     save_eval(models, train_loader, test_loader, losses, accs_train, accs_test, epoch, train_size)
 
+    for i in range(num_clients+1):
+        PATH = f"./checkpoint{i}{suffix}.pt"
+
+        torch.save({
+                    'epoch': epoch+1,
+                    'model_state_dict': models[i].state_dict(),
+                    'optimizer_state_dict': optimizers[i].state_dict(),
+                    'loss': 0,
+                    }, PATH)
+    print('Time taken: %.2f sec.' % (time.time() - start))
