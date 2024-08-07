@@ -65,9 +65,8 @@ lspci
 
 ```sh
 git clone https://github.com/workelaina/cvfl.git
-scp -P 20899 -r ModelNet_CVFL/ root@i-2.gpushare.com:/hy-tmp/
+scp -P 20899 quant_cifar.py root@i-2.gpushare.com:/hy-tmp/
 screen -R cvfl
-cd ModelNet_CVFL
 python quant_cifar.py 10class/classes/ --num_clients 2 --b 256 --local_epochs 2 --epochs 150 --lr 0.0001 --quant_level 8 --vecdim 2 --comp quantize
 Ctrl A D
 ```
