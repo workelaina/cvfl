@@ -11,34 +11,20 @@ from torch.autograd import Variable
 import torchvision
 import torchvision.transforms as transforms
 
+import pandas as pd
+from torch.utils.data import Dataset, DataLoader
+from sklearn.preprocessing import StandardScaler, OneHotEncoder
+from sklearn.compose import ColumnTransformer
+from sklearn.model_selection import train_test_split
+
 import argparse
 import numpy as np
 import time
 import os
-import copy
 import random
 import pickle
 import math
-import itertools
-
-# from scipy.optimize import minimize
-# from scipy.optimize import Bounds
-# from scipy.optimize import NonlinearConstraint
-# from scipy.optimize import BFGS
-
-# from models.resnet2 import *
-# from models.resnet_top import *
-# from models.mvcnn import *
-# from models.mvcnn_top_small import *
-# from models.mvcnn_bottom_small import *
-# import util
-# from logger import Logger
-# from custom_dataset import MultiViewDataSet
 import sys
-
-# from sklearn.cluster import KMeans
-# from sklearn import metrics as skmetrics
-
 import latbin
 
 MVCNN = 'mvcnn'
@@ -207,12 +193,6 @@ transform = transforms.Compose([
 #     download=True,
 #     transform=transform
 # )
-
-import pandas as pd
-from torch.utils.data import Dataset, DataLoader
-from sklearn.preprocessing import StandardScaler, OneHotEncoder
-from sklearn.compose import ColumnTransformer
-from sklearn.model_selection import train_test_split
 
 class CriteoDataset(Dataset):
     def __init__(self, features, labels):
