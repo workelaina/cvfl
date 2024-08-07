@@ -366,6 +366,7 @@ def train(models, optimizers, epoch): #, centers):
         for _i in range(40):
             eta.requires_grad_()
             adv_inp = inputs + eta
+            loss_sum = 0
 
             H_orig = [None] * num_clients
             for i in range(num_clients):
@@ -442,6 +443,7 @@ def train(models, optimizers, epoch): #, centers):
                     H[i] = outputs
                     outputs = server_model_comp(torch.cat(H,axis=1))
                     loss = criterion(outputs, targets.to(torch.int64))
+                    loss_sum += loss
 
                     # compute gradient and do gradient step
                     optimizer.zero_grad()
@@ -460,15 +462,15 @@ def train(models, optimizers, epoch): #, centers):
                 # compute output
                 outputs = server_model(torch.cat(H,axis=1))
                 loss = criterion(outputs, targets.to(torch.int64))
+                loss_sum += loss
 
                 # compute gradient and do SGD step
                 server_optimizer.zero_grad()
                 loss.backward(retain_graph=True)
                 server_optimizer.step()
 
-
             x_grad = torch.autograd.grad(
-                loss,
+                loss_sum,
                 eta,
                 only_inputs=True,
                 retain_graph=False
@@ -648,12 +650,9 @@ for epoch in range(start_epoch, n_epochs):
     save_eval(models, train_loader, test_loader, losses, accs_train, accs_test, epoch, train_size)
 
     for i in range(num_clients+1):
-        PATH = f"./checkpoint{i}{suffix}.pt"
+        PATH = f"./cp{i}{suffix}.pt"
 
         torch.save({
-                    'epoch': epoch+1,
-                    'model_state_dict': models[i].state_dict(),
-                    'optimizer_state_dict': optimizers[i].state_dict(),
-                    'loss': 0,
-                    }, PATH)
+            'model': models[i].state_dict(),
+        }, PATH)
     print('Time taken: %.2f sec.' % (time.time() - start))
