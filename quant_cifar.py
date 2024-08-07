@@ -27,6 +27,9 @@ import math
 import sys
 import latbin
 
+pgdcfg_eps = 0.3
+pgdcfg_sigma = 0.15
+
 MVCNN = 'mvcnn'
 RESNET = 'resnet'
 MODELS = [RESNET,MVCNN]
@@ -263,8 +266,12 @@ class MLP_client(nn.Module):
         super(MLP_client, self).__init__()
         self.conv1 = nn.Linear(input_size, output_size)
         self.classifier = nn.Sequential(self.conv1)
+        # self.adv_inp = None
 
     def forward(self, x):
+        # self.adv_inp = x
+        # self.adv_inp.requires_grad_()
+        # self.adv_inp.retain_grad()
         x = self.classifier(x)
         x = nn.functional.relu(x)
         return x
@@ -354,6 +361,123 @@ def train(models, optimizers, epoch): #, centers):
 
         inputs, targets = inputs.to(device), targets.to(device)
         # inputs, targets = Variable(inputs), Variable(targets)
+
+        eta = torch.FloatTensor(*inputs.shape).uniform_(-pgdcfg_eps, pgdcfg_eps).to(device)
+        for _i in range(40):
+            eta.requires_grad_()
+            adv_inp = inputs + eta
+
+            H_orig = [None] * num_clients
+            for i in range(num_clients):
+                r = math.floor(i/2)
+                c = i % 2
+                section = coords_per
+                x_local = adv_inp[:, section*r:section*(r+1)]
+                x_local = torch.transpose(x_local,0,1)
+                with torch.no_grad():
+                    H_orig[i] = models[i](x_local)
+
+                # Compress embedding
+                if comp != "":
+                    if comp == "topk" and not (epoch == 0 and step == 0):
+                        # Choose top k elements based on grads_Hs[i]
+                        H_tmp = H_orig[i].cpu().detach().numpy()
+                        num = math.ceil(H_tmp.shape[1]*(1-ratio))
+                        grads = np.abs(grads_Hs[i])
+                        idx = np.argpartition(grads, num)[:num]
+                        indices = idx[np.argsort((grads)[idx])]
+                        H_tmp[:,indices[:num]] = 0
+                        H_orig[i] = torch.from_numpy(H_tmp).float().cuda(device)
+                    elif comp == "topk": 
+                        # If first iteration, do nothing
+                        pass
+                    elif args.vecdim == 1:
+                        # Scalar quantization
+                        H_orig[i] = quantize_scalar(H_orig[i].cpu().detach().numpy(), 
+                            quant_level=args.quant_level)
+                    else:
+                        # Vector quantization
+                        H_orig[i] = quantize_vector(H_orig[i].cpu().detach().numpy(),                        
+                                quant_level=args.quant_level, dim=args.vecdim)
+
+            # Compress server model
+            if comp != "":
+                tmp_dict = server_model.state_dict()
+                for key,value in tmp_dict.items():
+                    vdim = value.dim() 
+                    shape = value.shape
+                    if comp == "topk":
+                        tmp_dict[key] = topk(value, ratio) 
+                    elif args.vecdim == 1:
+                        if vdim == 1:
+                            value = value.reshape(1,-1)
+                        tmp_dict[key] = quantize_scalar(value.cpu().detach().numpy(), 
+                            quant_level=args.quant_level).reshape(shape)
+                    else:
+                        if vdim == 1:
+                            value = value.reshape(1,-1)
+                        tmp_dict[key] = quantize_vector(value.cpu().detach().numpy(), 
+                            quant_level=args.quant_level, dim=args.vecdim).reshape(shape)
+                server_model_comp.load_state_dict(tmp_dict)
+            else:
+                server_model_comp = server_model
+
+            # Train clients
+            for i in range(num_clients):
+                r = math.floor(i/2)
+                c = i % 2
+                section = coords_per
+                x_local = adv_inp[:, section*r:section*(r+1)]
+                x_local = torch.transpose(x_local,0,1)
+                H = H_orig.copy()
+                model = models[i]
+                optimizer = optimizers[i]
+
+                # Calculate number of local iterations
+                client_epochs = args.local_epochs
+                # Train
+                for le in range(client_epochs):
+                    # compute output
+                    outputs = model(x_local)
+                    H[i] = outputs
+                    outputs = server_model_comp(torch.cat(H,axis=1))
+                    loss = criterion(outputs, targets.to(torch.int64))
+
+                    # compute gradient and do gradient step
+                    optimizer.zero_grad()
+                    server_optimizer_comp.zero_grad()
+                    loss.backward(retain_graph=True)
+                    params = []
+                    for param in model.parameters():
+                        params.append(param.grad)
+                    params[-1] = params[-1].detach().cpu().numpy()
+                    grads_Hs[i] = np.array(params[-1])
+                    optimizer.step()
+
+            # Train server
+            for le in range(args.local_epochs):
+                H = H_orig.copy()
+                # compute output
+                outputs = server_model(torch.cat(H,axis=1))
+                loss = criterion(outputs, targets.to(torch.int64))
+
+                # compute gradient and do SGD step
+                server_optimizer.zero_grad()
+                loss.backward(retain_graph=True)
+                server_optimizer.step()
+
+
+            x_grad = torch.autograd.grad(
+                loss,
+                eta,
+                only_inputs=True,
+                retain_graph=False
+            )[0].detach()
+            adv_inp += x_grad.sign() * pgdcfg_sigma
+            adv_inp.clamp_(0., 1.)
+            eta = adv_inp - inputs
+            eta.clamp_(-pgdcfg_eps, pgdcfg_eps)
+
         # Exchange embeddings
         H_orig = [None] * num_clients
         for i in range(num_clients):
