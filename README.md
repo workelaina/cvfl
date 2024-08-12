@@ -50,6 +50,15 @@ pip install scikit-learn tqdm scipy pandas matplotlib -i https://mirrors.jlu.edu
 pip install latbin -i https://mirrors.jlu.edu.cn/pypi/simple
 ```
 
+##### env-conda
+
+```sh
+which python
+python -c 'import torch;print(torch.cuda.is_available())'
+pip install --upgrade pip wheel setuptools -i https://mirrors.jlu.edu.cn/pypi/simple
+pip install scikit-learn tqdm scipy pandas matplotlib -i https://mirrors.jlu.edu.cn/pypi/simple
+```
+
 ##### check
 
 ```sh
@@ -65,8 +74,8 @@ lspci
 
 ```sh
 # git clone https://github.com/workelaina/cvfl.git
-scp -P 45583 train.py root@i-2.gpushare.com:/hy-tmp/
+scp -P 42599 train.py root@i-1.gpushare.com:/hy-tmp/
 screen -R cvfl
-python train.py 10class/classes/ --num_clients 2 --b 128 --local_epochs 2 --epochs 150 --lr 0.0001 --quant_level 8 --vecdim 2 --comp quantize
+python train.py 10class/classes/ --num_clients 2 --b 128 --local_epochs 2 --epochs 150 --lr 0.0001 --quant_level 8 --vecdim 1 --comp quantize
 Ctrl A D
 ```
