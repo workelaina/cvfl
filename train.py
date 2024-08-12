@@ -10,7 +10,7 @@ import random
 import pickle
 import math
 import sys
-import latbin
+# import latbin
 
 # import pandas as pd
 # from sklearn.preprocessing import StandardScaler, OneHotEncoder
@@ -97,47 +97,49 @@ assert torch.cuda.is_available()
 device = torch.device("cuda:0")
 
 def quantize_vector(x, quant_min=0, quant_max=1, quant_level=5, dim=2):
-    """Uniform vector quantization approach
+    raise ValueError('latbin')
+    return None
+#     """Uniform vector quantization approach
 
-    Notebook: C2S2_DigitalSignalQuantization.ipynb
+#     Notebook: C2S2_DigitalSignalQuantization.ipynb
 
-    Args:
-        x: Original signal
-        quant_min: Minimum quantization level
-        quant_max: Maximum quantization level
-        quant_level: Number of quantization levels
-        dim: dimension of vectors to quantize
+#     Args:
+#         x: Original signal
+#         quant_min: Minimum quantization level
+#         quant_max: Maximum quantization level
+#         quant_level: Number of quantization levels
+#         dim: dimension of vectors to quantize
 
-    Returns:
-        x_quant: Quantized signal
+#     Returns:
+#         x_quant: Quantized signal
 
-        Currently only works for 2 dimensions and 
-        quant_levels of 4, 8, and 16.
-    """
+#         Currently only works for 2 dimensions and 
+#         quant_levels of 4, 8, and 16.
+#     """
 
-    dither = np.random.uniform(-(quant_max-quant_min)/(2*(quant_level-1)), 
-                                (quant_max-quant_min)/(2*(quant_level-1)),
-                                size=np.array(x).shape) 
-    # Move into 0,1 range:
-    x_normalize = x/np.max(x)
-    x_normalize = x_normalize + dither
+#     dither = np.random.uniform(-(quant_max-quant_min)/(2*(quant_level-1)), 
+#                                 (quant_max-quant_min)/(2*(quant_level-1)),
+#                                 size=np.array(x).shape) 
+#     # Move into 0,1 range:
+#     x_normalize = x/np.max(x)
+#     x_normalize = x_normalize + dither
 
-    A2 = latbin.lattice.ALattice(dim,scale=1/(2*math.log(quant_level,2)))
-    # What?
-    # if quant_level == 4:
-    #     A2 = latbin.lattice.ALattice(dim,scale=1/4)
-    # elif quant_level == 8:
-    #     A2 = latbin.lattice.ALattice(dim,scale=1/8.5)
-    # elif quant_level == 16:
-    #     A2 = latbin.lattice.ALattice(dim,scale=1/19)
+#     A2 = latbin.lattice.ALattice(dim,scale=1/(2*math.log(quant_level,2)))
+#     # What?
+#     # if quant_level == 4:
+#     #     A2 = latbin.lattice.ALattice(dim,scale=1/4)
+#     # elif quant_level == 8:
+#     #     A2 = latbin.lattice.ALattice(dim,scale=1/8.5)
+#     # elif quant_level == 16:
+#     #     A2 = latbin.lattice.ALattice(dim,scale=1/19)
     
-    for i in range(0, x_normalize.shape[1], dim):
-        x_normalize[:,i:(i+dim)] = A2.lattice_to_data_space(
-                                        A2.quantize(x_normalize[:,i:(i+dim)]))
+#     for i in range(0, x_normalize.shape[1], dim):
+#         x_normalize[:,i:(i+dim)] = A2.lattice_to_data_space(
+#                                         A2.quantize(x_normalize[:,i:(i+dim)]))
 
-    # Move out of 0,1 range:
-    x_normalize = np.max(x)*(x_normalize - dither)
-    return torch.from_numpy(x_normalize).float().cuda(device)
+#     # Move out of 0,1 range:
+#     x_normalize = np.max(x)*(x_normalize - dither)
+#     return torch.from_numpy(x_normalize).float().cuda(device)
 
 
 def quantize_scalar(x, quant_min=0, quant_max=1, quant_level=5):
@@ -259,7 +261,7 @@ optimizers = []
 # Make models for each client
 for i in range(num_clients+1):
     if i == num_clients:
-        model = Server_L2(128, 10)
+        model = Server_L2(256, 10)
     else:
         model = myResNet(18, 1, 128)
     optimizer = torch.optim.SGD(model.parameters(), lr=args.lr)
@@ -270,7 +272,7 @@ for i in range(num_clients+1):
     models.append(model)
     optimizers.append(optimizer)
 
-server_model_comp = Server_L2(128, 10)
+server_model_comp = Server_L2(256, 10)
 
 server_model_comp.to(device)
 server_optimizer_comp = torch.optim.SGD(server_model_comp.parameters(), lr=args.lr)
@@ -320,6 +322,7 @@ def train(models, optimizers, epoch): #, centers):
         ratio = math.log(args.quant_level,2)/32
 
     for step, (inputs, targets) in enumerate(train_loader):
+        print(step)
         # Convert from list of 3D to 4D
         inputs = np.stack(inputs, axis=1)
 
@@ -332,7 +335,7 @@ def train(models, optimizers, epoch): #, centers):
         for _i in range(40):
             eta.requires_grad_()
             adv_inp = inputs + eta
-            loss_sum = 0
+            grads = list()
 
             H_orig = [None] * num_clients
             for i in range(num_clients):
@@ -409,7 +412,15 @@ def train(models, optimizers, epoch): #, centers):
                     H[i] = outputs
                     outputs = server_model_comp(torch.cat(H,axis=1))
                     loss = criterion(outputs, targets.to(torch.int64))
-                    loss_sum += loss
+
+                    if le == 0:
+                        x_grad = torch.autograd.grad(
+                            loss,
+                            eta,
+                            only_inputs=True,
+                            retain_graph=True
+                        )[0].detach()
+                        grads.append(x_grad[:, section*r:section*(r+1)])
 
                     # compute gradient and do gradient step
                     optimizer.zero_grad()
@@ -422,29 +433,24 @@ def train(models, optimizers, epoch): #, centers):
                     grads_Hs[i] = np.array(params[-1])
                     optimizer.step()
 
+            # x_grad = torch.cat(grads)
+            x_grad = grads[0] + grads[1]
+            adv_inp += x_grad.sign() * pgdcfg_sigma
+            adv_inp.clamp_(0., 1.)
+            eta = adv_inp - inputs
+            eta.clamp_(-pgdcfg_eps, pgdcfg_eps)
+
             # Train server
             for le in range(args.local_epochs):
                 H = H_orig.copy()
                 # compute output
                 outputs = server_model(torch.cat(H,axis=1))
                 loss = criterion(outputs, targets.to(torch.int64))
-                loss_sum += loss
 
                 # compute gradient and do SGD step
                 server_optimizer.zero_grad()
                 loss.backward(retain_graph=True)
                 server_optimizer.step()
-
-            x_grad = torch.autograd.grad(
-                loss_sum,
-                eta,
-                only_inputs=True,
-                retain_graph=False
-            )[0].detach()
-            adv_inp += x_grad.sign() * pgdcfg_sigma
-            adv_inp.clamp_(0., 1.)
-            eta = adv_inp - inputs
-            eta.clamp_(-pgdcfg_eps, pgdcfg_eps)
 
         # Exchange embeddings
         H_orig = [None] * num_clients
@@ -607,7 +613,8 @@ if start_epoch == 0:
 # Training / Eval loop
 train_size = len(train_loader)
 print('[222]')
-for epoch in range(start_epoch, n_epochs):
+assert start_epoch == 0
+for epoch in range(n_epochs):
     print('\n-----------------------------------')
     print('Epoch: [%d/%d]' % (epoch+1, n_epochs))
     start = time.time()
@@ -616,7 +623,7 @@ for epoch in range(start_epoch, n_epochs):
     save_eval(models, train_loader, test_loader, losses, accs_train, accs_test, epoch, train_size)
 
     for i in range(num_clients+1):
-        PATH = f"./cp{i}{suffix}.pt"
+        PATH = f"./cp{i}{suffix}_{epoch}.pt"
 
         torch.save({
             'model': models[i].state_dict(),
