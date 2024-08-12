@@ -17,7 +17,7 @@ chmod u+x ./update_source
 # 1 (bfsu)
 apt update
 apt upgrade
-apt install screen tree pciutils
+apt install screen tree pciutils pkg-config
 vim ~/.ssh/authorized_keys
 ```
 
@@ -64,9 +64,9 @@ lspci
 ##### run
 
 ```sh
-git clone https://github.com/workelaina/cvfl.git
-scp -P 20899 quant_cifar.py root@i-2.gpushare.com:/hy-tmp/
+# git clone https://github.com/workelaina/cvfl.git
+scp -P 45583 train.py root@i-2.gpushare.com:/hy-tmp/
 screen -R cvfl
-python quant_cifar.py 10class/classes/ --num_clients 2 --b 256 --local_epochs 2 --epochs 150 --lr 0.0001 --quant_level 8 --vecdim 2 --comp quantize
+python train.py 10class/classes/ --num_clients 2 --b 128 --local_epochs 2 --epochs 150 --lr 0.0001 --quant_level 8 --vecdim 2 --comp quantize
 Ctrl A D
 ```
