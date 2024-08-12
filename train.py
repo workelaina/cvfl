@@ -2,21 +2,6 @@
 Train VFL on ModelNet-10 dataset
 """
 
-import torch
-import torch.nn as nn
-import torch.backends.cudnn as cudnn
-from torch.utils.data import DataLoader
-from torch.autograd import Variable
-
-import torchvision
-import torchvision.transforms as transforms
-
-import pandas as pd
-from torch.utils.data import Dataset, DataLoader
-from sklearn.preprocessing import StandardScaler, OneHotEncoder
-from sklearn.compose import ColumnTransformer
-from sklearn.model_selection import train_test_split
-
 import argparse
 import numpy as np
 import time
@@ -26,6 +11,22 @@ import pickle
 import math
 import sys
 import latbin
+
+# import pandas as pd
+# from sklearn.preprocessing import StandardScaler, OneHotEncoder
+# from sklearn.compose import ColumnTransformer
+# from sklearn.model_selection import train_test_split
+
+import torch
+import torch.nn as nn
+import torch.backends.cudnn as cudnn
+from torch.utils.data import DataLoader, Dataset
+from torch.autograd import Variable
+
+import torchvision
+import torchvision.transforms as transforms
+
+from network import Server_L2, myResNet
 
 pgdcfg_eps = 0.3
 pgdcfg_sigma = 0.15
@@ -183,70 +184,61 @@ transform = transforms.Compose([
     # transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
 ])
 
-# Load dataset
-# dset_train = torchvision.datasets.MNIST(
-#     root='./data',
-#     train=True,
-#     download=True,
-#     transform=transform
-# )
-# dset_val = torchvision.datasets.MNIST(
-#     root='./data',
-#     train=False,
-#     download=True,
-#     transform=transform
-# )
+dset_train = torchvision.datasets.MNIST(
+    root='./data',
+    train=True,
+    download=True,
+    transform=transform
+)
+dset_val = torchvision.datasets.MNIST(
+    root='./data',
+    train=False,
+    download=True,
+    transform=transform
+)
 
-class CriteoDataset(Dataset):
-    def __init__(self, features, labels):
-        self.features = features
-        self.labels = labels
+# class CriteoDataset(Dataset):
+#     def __init__(self, features, labels):
+#         self.features = features
+#         self.labels = labels
 
-    def __len__(self):
-        return len(self.features)
+#     def __len__(self):
+#         return len(self.features)
 
-    def __getitem__(self, idx):
-        x = self.features[idx]
-        y = self.labels[idx]
-        return torch.tensor(x, dtype=torch.float32), torch.tensor(y, dtype=torch.float32)
+#     def __getitem__(self, idx):
+#         x = self.features[idx]
+#         y = self.labels[idx]
+#         return torch.tensor(x, dtype=torch.float32), torch.tensor(y, dtype=torch.float32)
 
-# 预处理Criteo数据集
-def load_criteo_data(file_path):
-    # 假设Criteo数据以CSV格式存储
-    data = pd.read_csv(file_path)
+# def load_criteo_data(file_path):
+#     data = pd.read_csv(file_path)
+#     labels = data.iloc[:, -1].values
+#     features = data.iloc[:, :-1]
 
-    # 假设数据集最后一列为标签
-    labels = data.iloc[:, -1].values
-    features = data.iloc[:, :-1]
+#     numeric_features = features.select_dtypes(include=['int64', 'float64']).columns
+#     categorical_features = features.select_dtypes(include=['object']).columns
 
-    # 对数值特征进行标准化
-    numeric_features = features.select_dtypes(include=['int64', 'float64']).columns
-    categorical_features = features.select_dtypes(include=['object']).columns
+#     preprocessor = ColumnTransformer(
+#         transformers=[
+#             ('num', StandardScaler(), numeric_features),
+#             ('cat', OneHotEncoder(handle_unknown='ignore'), categorical_features)
+#         ])
 
-    # 使用ColumnTransformer进行预处理
-    preprocessor = ColumnTransformer(
-        transformers=[
-            ('num', StandardScaler(), numeric_features),
-            ('cat', OneHotEncoder(handle_unknown='ignore'), categorical_features)
-        ])
+#     features = preprocessor.fit_transform(features)
 
-    features = preprocessor.fit_transform(features)
-
-    return features, labels  
+#     return features, labels  
 
 
-file_path = os.path.join('data/criteo.csv')
-features, labels = load_criteo_data(file_path)
+# file_path = os.path.join('data/criteo.csv')
+# features, labels = load_criteo_data(file_path)
 
-# 将数据拆分为训练集和测试集
-X_train, X_test, y_train, y_test = train_test_split(features, labels, test_size=0.3, stratify=labels)
+# X_train, X_test, y_train, y_test = train_test_split(features, labels, test_size=0.3, stratify=labels)
 
-dset_train = CriteoDataset(X_train, y_train)
-dset_val = CriteoDataset(X_test, y_test)
+# dset_train = CriteoDataset(X_train, y_train)
+# dset_val = CriteoDataset(X_test, y_test)
 
 
 train_loader = DataLoader(dset_train, batch_size=args.batch_size, shuffle=False, num_workers=1)
-
 test_loader = DataLoader(dset_val, batch_size=args.batch_size, shuffle=False, num_workers=1)
 
 print(dset_train, dset_val)
@@ -261,42 +253,15 @@ best_loss = 0.0
 start_epoch = 0
 
 
-class MLP_client(nn.Module):
-    def __init__(self, input_size=52, output_size=52):
-        super(MLP_client, self).__init__()
-        self.conv1 = nn.Linear(input_size, output_size)
-        self.classifier = nn.Sequential(self.conv1)
-        # self.adv_inp = None
-
-    def forward(self, x):
-        # self.adv_inp = x
-        # self.adv_inp.requires_grad_()
-        # self.adv_inp.retain_grad()
-        x = self.classifier(x)
-        x = nn.functional.relu(x)
-        return x
-
-
-class MLP_server(nn.Module):
-    def __init__(self, input_size=52*2, output_size=2):
-        super(MLP_server, self).__init__()
-        self.conv1 = nn.Linear(input_size, output_size)
-        self.classifier = nn.Sequential(self.conv1)
-
-    def forward(self, x):
-        x = self.classifier(x)
-        x = torch.sigmoid(x)
-        return x
-
-
+print('BEGIN [init model & optim]')
 models = []
 optimizers = []
 # Make models for each client
 for i in range(num_clients+1):
     if i == num_clients:
-        model = MLP_server()
+        model = Server_L2(128, 10)
     else:
-        model = MLP_client()
+        model = myResNet(18, 1, 128)
     optimizer = torch.optim.SGD(model.parameters(), lr=args.lr)
 
     model.to(device)
@@ -305,10 +270,11 @@ for i in range(num_clients+1):
     models.append(model)
     optimizers.append(optimizer)
 
-server_model_comp = MLP_server()
+server_model_comp = Server_L2(128, 10)
 
 server_model_comp.to(device)
 server_optimizer_comp = torch.optim.SGD(server_model_comp.parameters(), lr=args.lr)
+print('END [init model & optim]')
 
 # Loss and Optimizer
 n_epochs = args.epochs
